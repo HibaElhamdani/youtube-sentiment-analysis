@@ -96,8 +96,6 @@ _SENTIMENT_LEXICON = {
 	"bzzaf",
 	"bzaaf",
 	"7mar",
-	"m9awed",
-	"mqawda",
 	"مقرف",
 	"روعة",
 	"واعر",
@@ -153,8 +151,11 @@ _MSA_MARKERS = {
 @dataclass
 class PreprocessConfig:
 	min_tokens: int = 2
-	# Lower threshold keeps mixed Darija/MSA comments (option 2).
-	darija_ratio_threshold: float = 0.4
+	# Higher threshold is stricter on Darija dominance.
+	darija_ratio_threshold: float = 0.5
+	min_darija_hits: int = 1
+	allow_mixed_script: bool = True
+	allow_arabizi: bool = True
 	keep_short_if_sentiment: bool = True
 	drop_emoji_only: bool = True
 
@@ -162,10 +163,16 @@ class PreprocessConfig:
 def _normalize_arabic(text: str) -> str:
 	# Basic normalization to reduce variants without aggressive stemming.
 	text = re.sub(r"[\u064B-\u065F\u0670]", "", text)  # diacritics
+	text = text.replace("\u0640", "")  # tatweel
 	text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
 	text = text.replace("ى", "ي").replace("ؤ", "و").replace("ئ", "ي")
 	text = text.replace("ة", "ه")
 	return text
+
+
+def _normalize_elongation(text: str) -> str:
+	# Reduce long letter repetitions: جميييل -> جميل
+	return re.sub(r"(.)\1{2,}", r"\1\1", text)
 
 
 def _strip_noise(text: str) -> str:
@@ -181,6 +188,7 @@ def _basic_clean(text: str) -> str:
 	text = text.replace("\u200f", " ").replace("\u200e", " ")
 	text = _strip_noise(text)
 	text = _normalize_arabic(text)
+	text = _normalize_elongation(text)
 	text = text.lower()
 	text = re.sub(r"[^\w\s\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]", " ", text)
 	text = _MULTISPACE_RE.sub(" ", text).strip()
@@ -207,19 +215,41 @@ def _is_emoji_only(text: str) -> bool:
 	return not _has_letters(_strip_noise(text))
 
 
+def _darija_stats(tokens: List[str]) -> Dict[str, int | bool]:
+	if not tokens:
+		return {
+			"darija_hits": 0,
+			"msa_hits": 0,
+			"has_arabic": False,
+			"has_latin": False,
+			"has_arabizi_digits": False,
+		}
+	darija_hits = sum(1 for t in tokens if t in _DARIJA_MARKERS)
+	msa_hits = sum(1 for t in tokens if t in _MSA_MARKERS)
+	has_arabic = any(_ARABIC_LETTERS_RE.search(t) for t in tokens)
+	has_latin = any(_LATIN_LETTERS_RE.search(t) for t in tokens)
+	has_arabizi_digits = any(re.search(r"[2379]", t) for t in tokens)
+	return {
+		"darija_hits": darija_hits,
+		"msa_hits": msa_hits,
+		"has_arabic": has_arabic,
+		"has_latin": has_latin,
+		"has_arabizi_digits": has_arabizi_digits,
+	}
+
+
 def _is_darija(tokens: List[str], cfg: PreprocessConfig) -> bool:
 	if not tokens:
 		return False
-	darija_hits = sum(1 for t in tokens if t in _DARIJA_MARKERS)
-	msa_hits = sum(1 for t in tokens if t in _MSA_MARKERS)
+	stats = _darija_stats(tokens)
+	darija_hits = stats["darija_hits"]
+	msa_hits = stats["msa_hits"]
 	total_hits = darija_hits + msa_hits
-	if darija_hits == 0 and msa_hits == 0:
-		# Keep if comment has mixed latin + arabic, typical Darija writing.
-		has_arabic = any(_ARABIC_LETTERS_RE.search(t) for t in tokens)
-		has_latin = any(_LATIN_LETTERS_RE.search(t) for t in tokens)
-		has_arabizi_digits = any(re.search(r"[2379]", t) for t in tokens)
-		return (has_arabic and has_latin) or has_arabizi_digits
 	if total_hits == 0:
+		mixed_ok = cfg.allow_mixed_script and stats["has_arabic"] and stats["has_latin"]
+		arabizi_ok = cfg.allow_arabizi and stats["has_arabizi_digits"]
+		return mixed_ok or arabizi_ok
+	if darija_hits < cfg.min_darija_hits:
 		return False
 	return (darija_hits / total_hits) >= cfg.darija_ratio_threshold
 
@@ -252,9 +282,19 @@ def preprocess_comment(text: str, cfg: PreprocessConfig) -> Optional[Dict[str, o
 	if not _is_darija(tokens, cfg):
 		return None
 
+	stats = _darija_stats(tokens)
+	lang_hint = "darija"
+	if stats["darija_hits"] == 0 and stats["msa_hits"] > 0:
+		lang_hint = "msa"
+	elif stats["has_arabic"] and stats["has_latin"]:
+		lang_hint = "mixed"
+	elif stats["has_arabizi_digits"]:
+		lang_hint = "arabizi"
+
 	return {
 		"text_clean": cleaned,
 		"tokens": tokens,
+		"lang_hint": lang_hint,
 	}
 
 
