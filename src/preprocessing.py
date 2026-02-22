@@ -84,6 +84,41 @@ _STOPWORDS = {
 }
 
 
+# Generic short phrases with no clear sentiment value.
+_GENERIC_PHRASES = {
+	"ما شاء الله",
+	"ماشاء الله",
+	"اللهم بارك",
+	"اللهم بارك فيك",
+	"الله يبارك",
+	"الله يبارك فيك",
+	"بارك الله فيك",
+	"بارك الله",
+	"الحمد لله",
+	"سبحان الله",
+	"لا اله الا الله",
+	"اللهم صل على محمد",
+	"اللهم صل وسلم",
+	"ما شاء الله تبارك الرحمن",
+}
+
+_GENERIC_TOKENS = {
+	"الله",
+	"اللهم",
+	"بارك",
+	"سبحان",
+	"الحمد",
+	"الرحمن",
+	"تبارك",
+	"صل",
+	"سلم",
+	"محمد",
+	"يارب",
+	"يا",
+	"رب",
+}
+
+
 # A small lexicon to prevent dropping short but meaningful sentiment comments.
 _SENTIMENT_LEXICON = {
 	"خايب",
@@ -145,19 +180,47 @@ _MSA_MARKERS = {
 	"بالتالي",
 	"على",
 	"إلى",
+	"كما",
+	"وقد",
+	"تم",
+	"لدى",
+	"إن",
+	"أن",
+}
+
+_RELIGIOUS_MARKERS = {
+	"الله",
+	"اللهم",
+	"الحمد",
+	"سبحان",
+	"الرحمن",
+	"تبارك",
+	"صل",
+	"سلم",
+	"محمد",
+	"رسول",
+	"النبي",
+	"المسلمين",
+	"الدعاء",
 }
 
 
 @dataclass
 class PreprocessConfig:
-	min_tokens: int = 2
-	# Higher threshold is stricter on Darija dominance.
-	darija_ratio_threshold: float = 0.5
+	min_tokens: int = 1
+	# Balanced threshold to keep Darija and mixed comments.
+	darija_ratio_threshold: float = 0.4
 	min_darija_hits: int = 1
 	allow_mixed_script: bool = True
 	allow_arabizi: bool = True
+	allow_arabic_no_markers: bool = True
+	arabic_no_markers_max_tokens: int = 20
+	allow_latin_no_markers: bool = True
+	latin_no_markers_max_tokens: int = 10
 	keep_short_if_sentiment: bool = True
 	drop_emoji_only: bool = True
+	drop_religious_msa: bool = False
+	drop_generic_phrases: bool = False
 
 
 def _normalize_arabic(text: str) -> str:
@@ -248,39 +311,79 @@ def _is_darija(tokens: List[str], cfg: PreprocessConfig) -> bool:
 	if total_hits == 0:
 		mixed_ok = cfg.allow_mixed_script and stats["has_arabic"] and stats["has_latin"]
 		arabizi_ok = cfg.allow_arabizi and stats["has_arabizi_digits"]
-		return mixed_ok or arabizi_ok
+		if mixed_ok or arabizi_ok:
+			return True
+		if cfg.allow_arabic_no_markers and stats["has_arabic"]:
+			return len(tokens) <= cfg.arabic_no_markers_max_tokens
+		if cfg.allow_latin_no_markers and stats["has_latin"]:
+			return len(tokens) <= cfg.latin_no_markers_max_tokens
+		return False
 	if darija_hits < cfg.min_darija_hits:
 		return False
-	return (darija_hits / total_hits) >= cfg.darija_ratio_threshold
+	if (darija_hits / total_hits) >= cfg.darija_ratio_threshold:
+		return True
+	# Otherwise reject MSA-dominant comments.
+	if msa_hits > darija_hits:
+		return False
+	return False
 
 
 def _has_short_sentiment(tokens: List[str]) -> bool:
 	return any(tok in _SENTIMENT_LEXICON for tok in tokens)
 
 
-def preprocess_comment(text: str, cfg: PreprocessConfig) -> Optional[Dict[str, object]]:
+def _is_generic_phrase(cleaned: str, tokens: List[str]) -> bool:
+	if cleaned in _GENERIC_PHRASES:
+		return True
+	if not tokens:
+		return True
+	if len(tokens) <= 4 and all(tok in _GENERIC_TOKENS for tok in tokens):
+		return True
+	return False
+
+
+def _is_religious_msa(tokens: List[str]) -> bool:
+	stats = _darija_stats(tokens)
+	if stats["has_latin"] or stats["has_arabizi_digits"]:
+		return False
+	if stats["darija_hits"] > 0:
+		return False
+	if not stats["has_arabic"]:
+		return False
+	return any(tok in _RELIGIOUS_MARKERS for tok in tokens)
+
+
+def _preprocess_comment_internal(
+	text: str, cfg: PreprocessConfig
+) -> tuple[Optional[Dict[str, object]], Optional[str]]:
 	if not isinstance(text, str):
-		return None
+		return None, "not_text"
 
 	if cfg.drop_emoji_only and _is_emoji_only(text):
-		return None
+		return None, "emoji_only"
 
 	cleaned = _basic_clean(text)
 	if not cleaned or not _has_letters(cleaned):
-		return None
+		return None, "empty_after_clean"
 
-	tokens = _remove_stopwords(_tokenize(cleaned))
+	full_tokens = _tokenize(cleaned)
+	if cfg.drop_generic_phrases and _is_generic_phrase(cleaned, full_tokens):
+		return None, "generic_phrase"
+	if cfg.drop_religious_msa and _is_religious_msa(full_tokens):
+		return None, "religious_msa"
+
+	tokens = _remove_stopwords(full_tokens)
 	if not tokens:
-		return None
+		return None, "only_stopwords"
 
 	if cfg.keep_short_if_sentiment and len(tokens) < cfg.min_tokens:
 		if not _has_short_sentiment(tokens):
-			return None
+			return None, "too_short_no_sentiment"
 	elif len(tokens) < cfg.min_tokens:
-		return None
+		return None, "too_short"
 
 	if not _is_darija(tokens, cfg):
-		return None
+		return None, "not_darija"
 
 	stats = _darija_stats(tokens)
 	lang_hint = "darija"
@@ -295,7 +398,12 @@ def preprocess_comment(text: str, cfg: PreprocessConfig) -> Optional[Dict[str, o
 		"text_clean": cleaned,
 		"tokens": tokens,
 		"lang_hint": lang_hint,
-	}
+	}, None
+
+
+def preprocess_comment(text: str, cfg: PreprocessConfig) -> Optional[Dict[str, object]]:
+	result, _ = _preprocess_comment_internal(text, cfg)
+	return result
 
 
 def _load_json(path: str) -> List[Dict[str, object]]:
@@ -311,6 +419,7 @@ def _save_json(path: str, data: List[Dict[str, object]]) -> None:
 def run_preprocessing(
 	raw_path: str = RAW_DATA_PATH,
 	output_path: str = PROCESSED_DATA_PATH,
+	dropped_path: str = "data/processed/comments_dropped.json",
 	cfg: Optional[PreprocessConfig] = None,
 ) -> Dict[str, int]:
 	if cfg is None:
@@ -318,13 +427,28 @@ def run_preprocessing(
 
 	raw_items = _load_json(raw_path)
 	processed: List[Dict[str, object]] = []
+	dropped: List[Dict[str, object]] = []
 	counters = Counter()
 
 	for item in raw_items:
 		text = item.get("text", "")
-		result = preprocess_comment(text, cfg)
+		result, reason = _preprocess_comment_internal(text, cfg)
 		if result is None:
 			counters["dropped"] += 1
+			if reason:
+				counters[f"dropped_{reason}"] += 1
+			dropped.append(
+				{
+					"comment_id": item.get("comment_id"),
+					"text": text,
+					"video_id": item.get("video_id"),
+					"author": item.get("author"),
+					"date": item.get("date"),
+					"likes": item.get("likes"),
+					"channel": item.get("channel"),
+					"drop_reason": reason,
+				},
+			)
 			continue
 
 		enriched = {
@@ -342,6 +466,7 @@ def run_preprocessing(
 		counters["kept"] += 1
 
 	_save_json(output_path, processed)
+	_save_json(dropped_path, dropped)
 	counters["total"] = len(raw_items)
 	return dict(counters)
 
