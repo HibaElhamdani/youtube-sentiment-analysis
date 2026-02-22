@@ -26,7 +26,7 @@ class YouTubeScraper:
         response = request.execute()
 
         if response["items"]:
-            channel_id = response["items"][0]["snippet"]["channelId"]
+            channel_id = response["items"][0]["id"]["channelId"]
             title = response["items"][0]["snippet"]["title"]
             print(f"✅ Chaîne trouvée : {title} ({channel_id})")
             return channel_id
@@ -62,9 +62,10 @@ class YouTubeScraper:
         print(f"  📹 {len(video_ids)} vidéos trouvées")
         return video_ids
 
-    def get_comments(self, video_id, max_comments=500):
+    def get_comments(self, video_id, max_comments=500, seen_ids=None):
         comments = []
         next_page_token = None
+        seen_ids = seen_ids or set()
 
         while len(comments) < max_comments:
             try:
@@ -79,14 +80,18 @@ class YouTubeScraper:
 
                 for item in response["items"]:
                     snippet = item["snippet"]["topLevelComment"]["snippet"]
+                    comment_id = item["id"]
+                    if comment_id in seen_ids:
+                        continue
                     comments.append({
-                        "comment_id": item["id"],
+                        "comment_id": comment_id,
                         "text": snippet["textDisplay"],
                         "video_id": video_id,
                         "author": snippet["authorDisplayName"],
                         "date": snippet["publishedAt"],
-                        "likes": snippet["likeCount"]
+                        "likes": snippet["likeCount"],
                     })
+                    seen_ids.add(comment_id)
 
                 next_page_token = response.get("nextPageToken")
                 if not next_page_token:
@@ -101,7 +106,8 @@ class YouTubeScraper:
         return comments
 
     def scrape_channel(self, channel_name, date_start, date_end,
-                       max_comments_per_channel=10000):
+                       max_comments_per_channel=10000, max_videos=200,
+                       seen_ids=None):
         print(f"\n{'='*50}")
         print(f"🔍 Chaîne : {channel_name}")
         print(f"{'='*50}")
@@ -110,15 +116,16 @@ class YouTubeScraper:
         if not channel_id:
             return []
 
-        video_ids = self.get_channel_videos(channel_id,
-                                             date_start, date_end)
+        video_ids = self.get_channel_videos(
+            channel_id, date_start, date_end, max_videos=max_videos
+        )
 
         all_comments = []
 
         for i, video_id in enumerate(video_ids):
             print(f"  📹 Vidéo {i+1}/{len(video_ids)} : {video_id}")
 
-            comments = self.get_comments(video_id)
+            comments = self.get_comments(video_id, seen_ids=seen_ids)
 
             for comment in comments:
                 comment["channel"] = channel_name
@@ -139,14 +146,25 @@ class YouTubeScraper:
 
         return all_comments
 
+    def _load_existing(self, path):
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                items = json.load(f)
+            return {c.get("comment_id"): c for c in items if c.get("comment_id")}
+        except Exception as e:
+            print(f"⚠️ Impossible de lire {path}: {e}")
+            return {}
+
     def scrape_all_channels(self):
         channels = [
-            "Bladna 24",
-            "Rimal TV",
-            "SAFAA",
-            "Swinga",
-            "PILOTA",
-            "BOTATO"
+            "Simo Sedraty",
+            "Marouane53",
+            "Raw Soueelt",
+            "Kawalis",
+            "Kifache TV",
+            "i3lamtv",
         ]
 
         # Période : janvier 2025 → février 2026
@@ -155,22 +173,25 @@ class YouTubeScraper:
 
         comments_per_channel = MAX_COMMENTS // len(channels)
 
-        # COMMENCE VIDE — pas d'ancien
-        all_comments = []
+        # Reprendre avec déduplication si fichier existe
+        existing = self._load_existing(RAW_DATA_PATH)
+        seen_ids = set(existing.keys())
+        all_comments = list(existing.values())
 
         for channel in channels:
             comments = self.scrape_channel(
                 channel_name=channel,
                 date_start=date_start,
                 date_end=date_end,
-                max_comments_per_channel=comments_per_channel
+                max_comments_per_channel=comments_per_channel,
+                seen_ids=seen_ids,
             )
             all_comments.extend(comments)
 
             print(f"\n📊 TOTAL jusqu'ici : {len(all_comments)} commentaires")
 
         # Supprimer les doublons
-        unique = {c["comment_id"]: c for c in all_comments}
+        unique = {c["comment_id"]: c for c in all_comments if c.get("comment_id")}
         all_comments = list(unique.values())
 
         # Sauvegarder
