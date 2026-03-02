@@ -15,6 +15,7 @@ PROCESSED_DATA_PATH = "data/processed/comments_clean.json"
 LABELED_DATA_PATH = "data/labeled/dataset_final.json"
 MODELS_PATH = "models_saved/"
 FIGURES_PATH = "reports/figures/"
+INSTAGRAM_DATA_PATH = "data/raw/inst.json"
 
 # Paramètres
 MAX_COMMENTS = 60000
