@@ -1,20 +1,134 @@
-# src/scraper.py
-
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from googleapiclient.discovery import build
 import json
 import time
-from config import YOUTUBE_API_KEY, RAW_DATA_PATH, MAX_COMMENTS
+import re
 
+# Add project root to sys.path to allow importing from config.py
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from googleapiclient.discovery import build
+from config import YOUTUBE_API_KEY, RAW_DATA_PATH
+
+# =====================================
+# CONFIGURATION
+# =====================================
+
+TOTAL_COMMENTS = 60000
+DARiJA_PERCENT = 0.85
+NEWS_PERCENT = 0.15
+
+DARiJA_CHANNELS = [
+    "Simo Sedraty",
+    "Kawalis",
+    "Marouane53",
+    "Raw Soueelt"
+]
+
+NEWS_CHANNELS = [
+    "Hespress",
+    "Kifache TV",
+    "i3lamtv"
+]
+
+MAX_VIDEOS_PER_CHANNEL = 150
+MAX_COMMENTS_PER_VIDEO = 500
+
+# =====================================
+# LINGUISTIC MARKERS
+# =====================================
+
+DARIJA_MARKERS = {
+    "واش","علاش","حيت","ديال","بزاف","راه",
+    "عندو","عندها","كن","ماشي","هاد","كاين",
+    "مكنش","غادي","دابا","خويا","اختي",
+    "حنا","نتا","نتي","حيتاش","عافاك"
+}
+
+LATIN_DARIJA_MARKERS = [
+    "7","9","3","5","2","gh","kh","ch"
+]
+
+MSA_STRONG_MARKERS = {
+    "يجب","ينب��ي","حيث","لذلك","بالتالي",
+    "وفق","علاوة","بينما","رغم",
+    "المجتمع","السياسة","الاقتصاد",
+    "المؤسسات","الإدارة","القانون",
+    "الدستور","التنمية","الحكومة",
+    "الرئيس","البرلمان","تصريح","بيان",
+    "السلطات","الوزارة","الهيئة"
+}
+
+# =====================================
+# TEXT CLEANING
+# =====================================
+
+def clean_text(text):
+    text = re.sub(r"http\S+", "", text)  # remove urls
+    text = re.sub(r"[^\w\s\u0600-\u06FF]", " ", text)
+    return text.strip()
+
+# =====================================
+# SMART DARIJA FILTER
+# =====================================
+
+def is_valid_comment(text: str) -> bool:
+    if not text:
+        return False
+
+    text = clean_text(text)
+    tokens = text.split()
+
+    if not any(c.isalpha() for c in text):
+        return False
+
+    if len(tokens) < 2:
+        return False
+
+    if len(tokens) > 50:
+        return False
+
+    darija_score = 0
+    msa_score = 0
+
+    # Darija Arabic markers
+    for w in DARIJA_MARKERS:
+        if w in text:
+            darija_score += 2
+
+    # Darija Latin markers
+    for marker in LATIN_DARIJA_MARKERS:
+        if marker in text:
+            darija_score += 1
+
+    # MSA markers
+    for w in MSA_STRONG_MARKERS:
+        if w in text:
+            msa_score += 2
+
+    # ✅ Keep if Darija dominant or equal
+    if darija_score >= msa_score:
+        return True
+
+    return False
+
+# =====================================
+# SCRAPER CLASS
+# =====================================
 
 class YouTubeScraper:
-
     def __init__(self):
-        self.youtube = build("youtube", "v3",
-                             developerKey=YOUTUBE_API_KEY)
+        self.youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+        self.all_comments = []
+        self.seen_ids = set()
+        self._load_existing_data()
+
+    def _load_existing_data(self):
+        if os.path.exists(RAW_DATA_PATH):
+            with open(RAW_DATA_PATH, "r", encoding="utf-8") as f:
+                self.all_comments = json.load(f)
+                self.seen_ids = {c["comment_id"] for c in self.all_comments}
+            print(f"📦 {len(self.seen_ids)} commentaires déjà chargés.")
 
     def get_channel_id(self, channel_name):
         request = self.youtube.search().list(
@@ -24,29 +138,20 @@ class YouTubeScraper:
             maxResults=1
         )
         response = request.execute()
-
         if response["items"]:
-            channel_id = response["items"][0]["id"]["channelId"]
-            title = response["items"][0]["snippet"]["title"]
-            print(f"✅ Chaîne trouvée : {title} ({channel_id})")
-            return channel_id
-        else:
-            print(f"❌ Chaîne '{channel_name}' non trouvée")
-            return None
+            return response["items"][0]["id"]["channelId"]
+        return None
 
-    def get_channel_videos(self, channel_id, date_start, date_end,
-                           max_videos=200):
+    def get_channel_videos(self, channel_id):
         video_ids = []
         next_page_token = None
 
-        while len(video_ids) < max_videos:
+        while len(video_ids) < MAX_VIDEOS_PER_CHANNEL:
             request = self.youtube.search().list(
                 channelId=channel_id,
                 part="id",
                 type="video",
-                order="date",
-                publishedAfter=date_start,
-                publishedBefore=date_end,
+                order="viewCount",
                 maxResults=50,
                 pageToken=next_page_token
             )
@@ -59,15 +164,13 @@ class YouTubeScraper:
             if not next_page_token:
                 break
 
-        print(f"  📹 {len(video_ids)} vidéos trouvées")
         return video_ids
 
-    def get_comments(self, video_id, max_comments=500, seen_ids=None):
-        comments = []
+    def get_comments(self, video_id):
+        video_comments = []
         next_page_token = None
-        seen_ids = seen_ids or set()
 
-        while len(comments) < max_comments:
+        while len(video_comments) < MAX_COMMENTS_PER_VIDEO:
             try:
                 request = self.youtube.commentThreads().list(
                     part="snippet",
@@ -81,136 +184,90 @@ class YouTubeScraper:
                 for item in response["items"]:
                     snippet = item["snippet"]["topLevelComment"]["snippet"]
                     comment_id = item["id"]
-                    if comment_id in seen_ids:
+
+                    if comment_id in self.seen_ids:
                         continue
-                    comments.append({
+
+                    text = snippet["textDisplay"]
+
+                    if not is_valid_comment(text):
+                        continue
+
+                    comment_data = {
                         "comment_id": comment_id,
-                        "text": snippet["textDisplay"],
+                        "text": text,
                         "video_id": video_id,
                         "author": snippet["authorDisplayName"],
                         "date": snippet["publishedAt"],
                         "likes": snippet["likeCount"],
-                    })
-                    seen_ids.add(comment_id)
+                    }
+
+                    video_comments.append(comment_data)
+                    self.seen_ids.add(comment_id)
 
                 next_page_token = response.get("nextPageToken")
                 if not next_page_token:
                     break
 
-                time.sleep(0.5)
+                time.sleep(0.3)
 
             except Exception as e:
-                print(f"    ⚠️ Erreur : {e}")
+                if "quotaExceeded" in str(e):
+                    print("🛑 Quota dépassé. Sauvegarde...")
+                    self.save_data()
+                    sys.exit()
                 break
 
-        return comments
+        return video_comments
 
-    def scrape_channel(self, channel_name, date_start, date_end,
-                       max_comments_per_channel=10000, max_videos=200,
-                       seen_ids=None):
-        print(f"\n{'='*50}")
-        print(f"🔍 Chaîne : {channel_name}")
-        print(f"{'='*50}")
+    def save_data(self):
+        with open(RAW_DATA_PATH, "w", encoding="utf-8") as f:
+            json.dump(self.all_comments, f, ensure_ascii=False, indent=2)
 
-        channel_id = self.get_channel_id(channel_name)
-        if not channel_id:
-            return []
+        print(f"💾 Sauvegarde: {len(self.all_comments)} commentaires")
 
-        video_ids = self.get_channel_videos(
-            channel_id, date_start, date_end, max_videos=max_videos
-        )
+    def scrape_balanced(self):
+        target_darija = int(TOTAL_COMMENTS * DARiJA_PERCENT)
+        target_news = int(TOTAL_COMMENTS * NEWS_PERCENT)
 
-        all_comments = []
+        print("🎯 Objectif Darija:", target_darija)
+        print("🎯 Objectif News:", target_news)
 
-        for i, video_id in enumerate(video_ids):
-            print(f"  📹 Vidéo {i+1}/{len(video_ids)} : {video_id}")
+        for channel_list, target in [
+            (DARiJA_CHANNELS, target_darija),
+            (NEWS_CHANNELS, target_news)
+        ]:
 
-            comments = self.get_comments(video_id, seen_ids=seen_ids)
+            for channel in channel_list:
+                print(f"\n🔍 Scraping {channel}")
 
-            for comment in comments:
-                comment["channel"] = channel_name
+                if len(self.all_comments) >= TOTAL_COMMENTS:
+                    break
 
-            all_comments.extend(comments)
+                cid = self.get_channel_id(channel)
+                if not cid:
+                    continue
 
-            print(f"    📝 {len(comments)} commentaires"
-                  f" (total: {len(all_comments)})")
+                videos = self.get_channel_videos(cid)
 
-            if len(all_comments) >= max_comments_per_channel:
-                print(f"  ✅ Objectif atteint : {len(all_comments)}")
-                break
+                for vid in videos:
+                    if len(self.all_comments) >= TOTAL_COMMENTS:
+                        break
 
-            time.sleep(0.5)
+                    comments = self.get_comments(vid)
 
-        batch_path = f"data/raw/batch_{channel_name.replace(' ', '_')}.json"
-        self.save(all_comments, batch_path)
+                    for c in comments:
+                        c["channel"] = channel
 
-        return all_comments
+                    self.all_comments.extend(comments)
 
-    def _load_existing(self, path):
-        if not os.path.exists(path):
-            return {}
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                items = json.load(f)
-            return {c.get("comment_id"): c for c in items if c.get("comment_id")}
-        except Exception as e:
-            print(f"⚠️ Impossible de lire {path}: {e}")
-            return {}
+                print(f"✅ {channel} terminé → total: {len(self.all_comments)}")
+                self.save_data()
 
-    def scrape_all_channels(self):
-        channels = [
-            "Simo Sedraty",
-            "Marouane53",
-            "Raw Soueelt",
-            "Kawalis",
-            "Kifache TV",
-            "i3lamtv",
-        ]
-
-        # Période : janvier 2025 → février 2026
-        date_start = "2025-01-01T00:00:00Z"
-        date_end = "2026-02-28T23:59:59Z"
-
-        comments_per_channel = MAX_COMMENTS // len(channels)
-
-        # Reprendre avec déduplication si fichier existe
-        existing = self._load_existing(RAW_DATA_PATH)
-        seen_ids = set(existing.keys())
-        all_comments = list(existing.values())
-
-        for channel in channels:
-            comments = self.scrape_channel(
-                channel_name=channel,
-                date_start=date_start,
-                date_end=date_end,
-                max_comments_per_channel=comments_per_channel,
-                seen_ids=seen_ids,
-            )
-            all_comments.extend(comments)
-
-            print(f"\n📊 TOTAL jusqu'ici : {len(all_comments)} commentaires")
-
-        # Supprimer les doublons
-        unique = {c["comment_id"]: c for c in all_comments if c.get("comment_id")}
-        all_comments = list(unique.values())
-
-        # Sauvegarder
-        self.save(all_comments, RAW_DATA_PATH)
-
-        print(f"\n{'='*50}")
-        print(f"✅ EXTRACTION TERMINÉE")
-        print(f"📊 Total : {len(all_comments)} commentaires")
-        print(f"💾 Sauvegardé dans {RAW_DATA_PATH}")
-        print(f"{'='*50}")
-
-        return all_comments
-
-    def save(self, comments, path):
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(comments, f, ensure_ascii=False, indent=2)
-        print(f"  💾 Sauvegardé dans {path}")
-
+# =====================================
+# RUN
+# =====================================
 
 if __name__ == "__main__":
     scraper = YouTubeScraper()
-    scraper.scrape_all_channels()
+    scraper.scrape_balanced()
