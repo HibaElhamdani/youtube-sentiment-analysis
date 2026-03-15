@@ -18,3 +18,4 @@ test.json
 data/cleaning_report.json
 count_bad_words.py
 normalize_years.py
+prepare_for_ollama.py

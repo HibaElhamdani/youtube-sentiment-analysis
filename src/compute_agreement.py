@@ -3,8 +3,8 @@ import pandas as pd
 from sklearn.metrics import cohen_kappa_score
 
 # Files
-my_file = r"C:\Users\HP\youtube-sentiment-analysis\data\labeled\labeled_comments100.json"
-partner_file = r"C:\Users\HP\youtube-sentiment-analysis\data\labeled\friend_overlap_100.json"
+my_file = r'C:\Users\elham\Desktop\youtube-sentiment-analysis\data\labeled\labeled_comments100.json'
+partner_file = r"C:\Users\elham\Desktop\youtube-sentiment-analysis\data\labeled\friend_overlap_100.json"
 
 # Load
 with open(my_file, "r", encoding="utf-8") as f:
