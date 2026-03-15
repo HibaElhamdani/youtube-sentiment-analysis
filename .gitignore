@@ -12,3 +12,9 @@ node_modules/
 .DS_Store
 venv/
 .venv/
+manual_500_hiba.json
+manual_500_friend.json
+test.json
+data/cleaning_report.json
+count_bad_words.py
+normalize_years.py
