@@ -1,11 +1,11 @@
 import json
 
 # Paths
-global_file = r"C:\Users\elham\Desktop\youtube-sentiment-analysis\data\processed\comments_clean.json"
-manual_me_file = r"C:\Users\elham\Desktop\youtube-sentiment-analysis\manual_500_hiba.json"
-manual_friend_file = r"C:\Users\elham\Desktop\youtube-sentiment-analysis\manual_500_friend.json"
+global_file = r"C:\Users\HP\youtube-sentiment-analysis\data\processed\comments_clean.json"
+manual_me_file = r"C:\Users\HP\youtube-sentiment-analysis\manual_500.json"
+manual_friend_file = r"C:\Users\HP\youtube-sentiment-analysis\manual_500_friend.json"
 
-output_file = r"C:\Users\elham\Desktop\youtube-sentiment-analysis\data\processed\comments_for_llm.json"
+output_file = r"C:\Users\HP\youtube-sentiment-analysis\data\processed\comments_for_llm.json"
 
 # Load files
 with open(global_file, "r", encoding="utf-8") as f:

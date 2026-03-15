@@ -51,7 +51,7 @@ def load_labeled_data(export_file_path):
 # ========================================
 
 # 1. Charger le fichier exporté
-df = load_labeled_data('C:\\Users\\elham\\Desktop\\youtube-sentiment-analysis\\h.json')
+df = load_labeled_data('manual_500_hibalab.json')
 
 # 2. Afficher les résultats
 print("📊 Données labellisées :")
@@ -62,6 +62,6 @@ print("\n📈 Distribution des sentiments :")
 print(df['sentiment'].value_counts())
 
 # 4. Sauvegarder
-df.to_json('data\\labeled\\labeled_comments1.json', orient='records', force_ascii=False, indent=2)
+df.to_json('data\\labeled\\labeled_comments.json', orient='records', force_ascii=False, indent=2)
 
 print("\n✅ Données sauvegardées !")
