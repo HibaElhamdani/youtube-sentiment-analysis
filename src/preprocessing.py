@@ -8,6 +8,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
+from datetime import datetime
 
 try:
     import emoji
@@ -889,7 +890,19 @@ def run_preprocessing(
             unique_items.append(item)
             seen_ids.add(cid)
     all_items = unique_items
-    
+
+    # ✅ FILTRE : garder uniquement les commentaires de 2025-2026
+    all_items_filtered = []
+    date_dropped = 0
+    for item in all_items:
+        date_str = item.get("date", "")
+        if isinstance(date_str, str) and re.search(r"202[56]", date_str):
+            all_items_filtered.append(item)
+        else:
+            date_dropped += 1
+    all_items = all_items_filtered
+    print(f"  📅 Commentaires hors 2025-2026 supprimés : {date_dropped}")
+
     youtube_count = sum(1 for i in all_items if i.get("source") == "youtube")
     instagram_count = sum(1 for i in all_items if i.get("source") == "instagram")
     
