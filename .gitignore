@@ -1,0 +1,124 @@
+# ═══════════════════════════════════════════════════════
+# SECRETS & CONFIG
+# ═══════════════════════════════════════════════════════
+.env
+.env.local
+.env.*.local
+config_local.py
+*.key
+*.pem
+
+# ═══════════════════════════════════════════════════════
+# DONNÉES (trop lourdes + RGPD)
+# ═══════════════════════════════════════════════════════
+data/raw/
+data/processed/
+data/labeled/
+data/cleaning_report.json
+*.json
+!data/sample/*.json
+!requirements.json
+!config.json
+!.env.example
+
+# ═══════════════════════════════════════════════════════
+# FICHIERS ONE-SHOT / DEBUG (à la racine)
+# ═══════════════════════════════════════════════════════
+combined_full_data_part1.json
+combined_full_data*.json
+manual_500_hiba.json
+manual_500_friend.json
+manual_500_hibalab.json
+manual_500_*.json
+project-*.json
+test.json
+src/filterdata.py
+src/fusion_id.py
+src/remove_manual_from_global.py
+src/labeling.py
+src/models.py
+
+# ═══════════════════════════════════════════════════════
+# ENVIRONNEMENTS VIRTUELS
+# ═══════════════════════════════════════════════════════
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ═══════════════════════════════════════════════════════
+# MLFLOW (métadonnées + base de données)
+# ═══════════════════════════════════════════════════════
+mlruns/
+mlartifacts/
+artifacts/
+notebooks/mlruns/
+notebooks/artifacts/
+mlflow.db
+mlflow.sqlite
+
+# ═══════════════════════════════════════════════════════
+# PYTHON
+# ═══════════════════════════════════════════════════════
+__pycache__/
+src/__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ═══════════════════════════════════════════════════════
+# JUPYTER
+# ═══════════════════════════════════════════════════════
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ═══════════════════════════════════════════════════════
+# IDE & OS
+# ═══════════════════════════════════════════════════════
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ═══════════════════════════════════════════════════════
+# IMAGES (sauf celles dans reports/figures/)
+# ═══════════════════════════════════════════════════════
+*.png
+*.jpg
+*.jpeg
+!reports/figures/*.png
+!reports/figures/*.jpg
+!reports/figures/*.jpeg
+
+# ═══════════════════════════════════════════════════════
+# ARCHIVES
+# ═══════════════════════════════════════════════════════
+*.zip
+*.tar.gz
+*.rar
+
+# ═══════════════════════════════════════════════════════
+# NODE
+# ═══════════════════════════════════════════════════════
+node_modules/
+
+# ═══════════════════════════════════════════════════════
+# DIVERS
+# ═══════════════════════════════════════════════════════
+*.log
+*.tmp
+*.bak
+*.pid
+logs/
+reccuperer.py
+!sample/
+!sample/*.json
+reports
