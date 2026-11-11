@@ -70,7 +70,7 @@ Après filtrage, on garde environ 80% des commentaires bruts.
 ### Labellisation
 
 - 2 000 commentaires labellisés manuellement sur Label Studio
-- 78 000 commentaires labellisés automatiquement avec Gemini
+- 98 000 commentaires labellisés automatiquement avec Gemini
 - Validation avec Label Studio + calcul du Cohen's Kappa pour l'accord inter-annotateurs
 
 ---
